@@ -1,0 +1,117 @@
+erDiagram
+    DEPARTMENT ||--o{ DOCTOR : employs
+    DOCTOR ||--o{ APPOINTMENT : conducts
+    PATIENT ||--o{ APPOINTMENT : books
+    PATIENT ||--o{ ALLERGY : has
+    APPOINTMENT ||--o{ DIAGNOSIS : records
+    ICD10_CODE ||--o{ DIAGNOSIS : classifies
+    APPOINTMENT ||--o{ PRESCRIPTION : produces
+    PRESCRIPTION ||--|{ PRESCRIPTION_ITEM : contains
+    MEDICATION ||--o{ PRESCRIPTION_ITEM : "prescribed as"
+    APPOINTMENT ||--o{ LAB_ORDER : requests
+    LAB_TEST ||--o{ LAB_ORDER : "ordered as"
+    LAB_ORDER ||--o| LAB_RESULT : yields
+    APPOINTMENT ||--o| INVOICE : "billed by"
+    INVOICE ||--o{ PAYMENT : "settled by"
+
+    DEPARTMENT {
+        smallint department_id PK
+        varchar name UK
+        varchar floor_location
+    }
+    DOCTOR {
+        int doctor_id PK
+        varchar licence_no UK
+        varchar first_name
+        varchar last_name
+        varchar email UK
+        varchar specialisation
+        smallint department_id FK
+        boolean is_active
+    }
+    PATIENT {
+        int patient_id PK
+        char hospital_no UK
+        varchar first_name
+        varchar last_name
+        date date_of_birth
+        char sex
+        varchar phone
+        varchar postcode
+        varchar blood_group
+    }
+    ALLERGY {
+        int patient_id PK, FK
+        varchar allergen PK
+        varchar severity
+    }
+    APPOINTMENT {
+        bigint appointment_id PK
+        int patient_id FK
+        int doctor_id FK
+        timestamptz scheduled_start
+        timestamptz scheduled_end
+        varchar status
+        varchar reason
+    }
+    ICD10_CODE {
+        varchar code PK
+        varchar description
+    }
+    DIAGNOSIS {
+        bigint diagnosis_id PK
+        bigint appointment_id FK
+        varchar icd10_code FK
+        boolean is_primary
+    }
+    MEDICATION {
+        int medication_id PK
+        varchar name
+        varchar form
+        varchar strength
+        numeric unit_price
+        int stock_qty
+    }
+    PRESCRIPTION {
+        bigint prescription_id PK
+        bigint appointment_id FK
+        timestamptz issued_at
+        boolean dispensed
+    }
+    PRESCRIPTION_ITEM {
+        bigint prescription_id PK, FK
+        int medication_id PK, FK
+        varchar dosage
+        varchar frequency
+        int quantity
+    }
+    LAB_TEST {
+        varchar test_code PK
+        varchar name
+        numeric ref_low
+        numeric ref_high
+        numeric price
+    }
+    LAB_ORDER {
+        bigint lab_order_id PK
+        bigint appointment_id FK
+        varchar test_code FK
+        varchar status
+    }
+    LAB_RESULT {
+        bigint lab_order_id PK, FK
+        numeric result_value
+        char flag
+    }
+    INVOICE {
+        bigint invoice_id PK
+        bigint appointment_id FK, UK
+        numeric total_amount
+        varchar status
+    }
+    PAYMENT {
+        bigint payment_id PK
+        bigint invoice_id FK
+        numeric amount
+        varchar method
+    }
