@@ -1,0 +1,36 @@
+SET
+--- Test 1: double-booking a doctor (EXCLUDE constraint) ---
+psql:constraint_tests.sql:11: ERROR:  conflicting key value violates exclusion constraint "no_doctor_double_booking"
+DETAIL:  Key (doctor_id, tstzrange(scheduled_start, scheduled_end))=(1, ["2026-11-02 09:05:00+00","2026-11-02 09:20:00+00")) conflicts with existing key (doctor_id, tstzrange(scheduled_start, scheduled_end))=(1, ["2026-11-02 09:00:00+00","2026-11-02 09:15:00+00")).
+--- Test 2: negative medication stock (CHECK) ---
+psql:constraint_tests.sql:14: ERROR:  new row for relation "medication" violates check constraint "medication_stock_qty_check"
+DETAIL:  Failing row contains (5, Paracetamol, TABLET, 500mg, 0.05, -1).
+--- Test 3: duplicate hospital number (UNIQUE) ---
+psql:constraint_tests.sql:18: ERROR:  duplicate key value violates unique constraint "patient_hospital_no_key"
+DETAIL:  Key (hospital_no)=(CP00000001) already exists.
+--- Test 4: appointment for a non-existent patient (FOREIGN KEY) ---
+psql:constraint_tests.sql:22: ERROR:  insert or update on table "appointment" violates foreign key constraint "appointment_patient_id_fkey"
+DETAIL:  Key (patient_id)=(999999) is not present in table "patient".
+--- Test 5: invalid status value (CHECK / domain) ---
+psql:constraint_tests.sql:25: ERROR:  new row for relation "appointment" violates check constraint "appointment_status_check"
+DETAIL:  Failing row contains (1, 15577, 4, 2025-01-01 09:00:00+00, 2025-01-01 09:15:00+00, LOST, Referral, 2024-12-20 09:00:00+00).
+--- Test 6: date of birth in the future (CHECK) ---
+psql:constraint_tests.sql:29: ERROR:  new row for relation "patient" violates check constraint "patient_date_of_birth_check"
+DETAIL:  Failing row contains (20002, CP99999999, Future, Baby, 2026-11-10, M, null, null, null, null, null, null, 2026-10-31 09:22:58.825032+00).
+--- Test 7: end time before start time (CHECK) ---
+psql:constraint_tests.sql:33: ERROR:  new row for relation "appointment" violates check constraint "appointment_check"
+DETAIL:  Failing row contains (150515, 1, 1, 2027-03-01 10:00:00+00, 2027-03-01 09:45:00+00, BOOKED, null, 2026-10-31 09:22:58.825213+00).
+--- Test 8: a CANCELLED appointment does NOT block the slot (partial EXCLUDE) — expected to SUCCEED ---
+BEGIN
+ appointment_id | doctor_id |    scheduled_start     
+----------------+-----------+------------------------
+         150516 |         1 | 2026-11-02 09:00:00+00
+(1 row)
+
+INSERT 0 1
+ action | row_pk | old_status | new_status 
+--------+--------+------------+------------
+ UPDATE | 137871 | BOOKED     | CANCELLED
+(1 row)
+
+ROLLBACK

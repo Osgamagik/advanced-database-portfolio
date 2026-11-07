@@ -1,0 +1,17 @@
+
+         t         | count  
+-------------------+--------
+ department        |      8
+ doctor            |     60
+ allergy           |   3787
+ patient           |  20000
+ lab_result        |  35013
+ lab_order         |  35013
+ prescription      |  69837
+ prescription_item | 102301
+ payment           | 107334
+ diagnosis         | 116487
+ invoice           | 116487
+ appointment       | 150512
+(12 rows)
+
