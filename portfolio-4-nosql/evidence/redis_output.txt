@@ -1,0 +1,82 @@
+Redis 7.0.15 | keys after FLUSHDB: 0
+
+==========================================================================================
+K1. Patient summary cache – Hash per patient, key = patient:{hospital_no}, TTL 15 min (cache-aside)
+==========================================================================================
+1st call: MISS -> loaded from PostgreSQL and stored in Redis
+{
+  "hospital_no": "CP00012345",
+  "name": "Michael Abubakar",
+  "dob": "1957-06-30",
+  "blood_group": "A-",
+  "allergies": "Latex (SEVERE)",
+  "visits": "6",
+  "last_visit": "2025-07-16 10:30:00+00",
+  "last_diagnosis": "I10"
+}
+2nd call: HIT;  TTL remaining = 900 s
+Latency over 200 patients – PostgreSQL query median 0.594 ms | Redis HGETALL median 0.162 ms | speed-up 3.7x
+Invalidation on write: when an allergy is added in PostgreSQL the app runs DEL patient:{hno}
+exists after DEL: 0
+
+==========================================================================================
+K2. Waiting-room queue – Sorted Set queue:doctor:{id}:{date}, score = check-in epoch
+==========================================================================================
+Queue (earliest first): [('CP00004410', 1793696400.0), ('CP00000500', 1793696460.0), ('CP00000077', 1793696520.0), ('CP00019001', 1793696700.0)]
+Position of CP00019001: 4 of 4
+Doctor calls next patient (ZPOPMIN, atomic): [('CP00004410', 1793696400.0)]
+Remaining: ['CP00000500', 'CP00000077', 'CP00019001']
+Urgent patient added with earlier score -> front of queue: ['CP00009999']
+
+==========================================================================================
+K3. Free slots – Set slots:doctor:5:2027-02-01 ; booking = SREM (atomic, returns 1 only to the winner)
+==========================================================================================
+Free slots: ['09:00', '09:15', '09:30', '09:45', '10:00', '10:15', '10:30', '10:45', '11:00', '11:15', '11:30', '11:45', '12:00', '12:15', '12:30', '12:45']
+Three clients race for 10:00 -> {'recept_A': 1, 'online_portal': 0, 'recept_B': 0} (exactly one gets 1)
+10:00 still free? 0 | free count: 15
+
+==========================================================================================
+K4. Optimistic transaction – WATCH / MULTI / EXEC (book slot + push to patient's upcoming list)
+==========================================================================================
+CP00000001: booked 11:00
+   (another client took 11:15 after WATCH)
+   WatchError for CP00000002 -> transaction discarded, retrying
+CP00000002: slot 11:15 no longer free
+upcoming:CP00000001 = ['2027-02-01 11:00 Dr5'] | upcoming:CP00000002 = []
+
+==========================================================================================
+K5. Lab-result notifications – Stream lab:results + consumer group 'doctor-app'
+==========================================================================================
+XADD 1793438802875-0 HBA1C 47.99 H for CP00001149
+XADD 1793438802875-1 FBC 177.41 H for CP00013378
+XADD 1793438802875-2 FBC 172.17 H for CP00002740
+XADD 1793438802875-3 TSH 4.54 H for CP00004666
+Consumer tablet-1 read 3 messages: ['HBA1C=47.99', 'FBC=177.41', 'FBC=172.17']
+Acked 2; pending (unacknowledged) entries: 1 -> the 3rd would be redelivered if tablet-1 crashed (at-least-once)
+
+==========================================================================================
+K6. Live dashboard – Sorted Set dash:consults:2026-10-30, ZINCRBY on each completed consult
+==========================================================================================
+Top 5 busiest doctors (ZREVRANGE):
+   Adeyemi (#23)          9
+   Williams (#17)         7
+   Nwosu (#34)            7
+   Lawal (#28)            7
+   Bello (#6)             7
+
+==========================================================================================
+K7. Session tokens – String with EX (auto-expiry, no clean-up job needed)
+==========================================================================================
+GET immediately : {"user": "dr17@carepoint.example", "role": "doctor"}
+GET after 2.2 s : None (expired)
+
+==========================================================================================
+Keyspace summary
+==========================================================================================
+   dash:consults:2026-10-30         type=zset
+   lab:results                      type=stream
+   queue:doctor:17:2026-11-03       type=zset
+   slots:doctor:5:2027-02-01        type=set
+   upcoming:CP00000001              type=list
+   patient:* cache entries: 200
+   used_memory_human: 1.82M

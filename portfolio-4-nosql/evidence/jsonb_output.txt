@@ -1,0 +1,221 @@
+psql:jsonb_document_model.sql:8: NOTICE:  schema "docstore" does not exist, skipping
+DROP SCHEMA
+CREATE SCHEMA
+SET
+SET
+Timing is on.
+CREATE TABLE
+Time: 3.388 ms
+=== D1. Build documents from the relational data (denormalise / embed) ===
+INSERT 0 20000
+Time: 4749.989 ms (00:04.750)
+ documents | total_size | avg_doc_bytes | max_encounters 
+-----------+------------+---------------+----------------
+     20000 | 29 MB      |          1373 |             20
+(1 row)
+
+Time: 76.513 ms
+=== D2. One sample document (whole patient history in ONE read, no joins) ===
+                     jsonb_pretty                     
+------------------------------------------------------
+ {                                                   +
+     "dob": "1957-06-30",                            +
+     "sex": "X",                                     +
+     "name": {                                       +
+         "last": "Abubakar",                         +
+         "first": "Michael"                          +
+     },                                              +
+     "contact": {                                    +
+         "city": "Leeds",                            +
+         "email": "patient12345@mail.example",       +
+         "phone": "+44 7042867443",                  +
+         "postcode": "AB56 6CD"                      +
+     },                                              +
+     "allergies": [                                  +
+         {                                           +
+             "allergen": "Latex",                    +
+             "severity": "SEVERE"                    +
+         }                                           +
+     ],                                              +
+     "encounters": [                                 +
+         {                                           +
+             "date": "2025-03-19T10:30:00+00:00",    +
+             "labs": [                               +
+                 {                                   +
+                     "flag": "N",                    +
+                     "test": "CRP",                  +
+                     "value": 2.56                   +
+                 }                                   +
+             ],                                      +
+             "doctor": "Amaka Lawal",                +
+             "status": "COMPLETED",                  +
+             "diagnoses": [                          +
+                 "E03.9"                             +
+             ],                                      +
+             "department": "Endocrinology",          +
+             "medications": [                        +
+                 {                                   +
+                     "qty": 28,                      +
+                     "name": "Atorvastatin",         +
+                     "strength": "20mg"              +
+                 }                                   +
+             ]                                       +
+         },                                          +
+         {                                           +
+             "date": "2025-03-28T14:00:00+00:00",    +
+             "doctor": "Amaka Lawal",                +
+             "status": "COMPLETED",                  +
+             "diagnoses": [                          +
+                 "E11.9"                             +
+             ],                                      +
+             "department": "Endocrinology"           +
+         },                                          +
+         {                                           +
+             "date": "2025-05-28T13:00:00+00:00",    +
+             "doctor": "Tunde Adeyemi",              +
+             "status": "COMPLETED",                  +
+             "diagnoses": [                          +
+                 "M54.5"                             +
+             ],                                      +
+             "department": "Orthopaedics",           +
+             "medications": [                        +
+                 {                                   +
+                     "qty": 28,                      +
+                     "name": "Levothyroxine",        +
+                     "strength": "50mcg"             +
+                 },                                  +
+                 {                                   +
+                     "qty": 56,                      +
+                     "name": "Omeprazole",           +
+                     "strength": "20mg"              +
+                 }                                   +
+             ]                                       +
+         },                                          +
+         {                                           +
+             "date": "2025-05-28T14:15:00+00:00",    +
+             "doctor": "Fatima Nwosu",               +
+             "status": "COMPLETED",                  +
+             "diagnoses": [                          +
+                 "O80"                               +
+             ],                                      +
+             "department": "Obstetrics & Gynaecology"+
+         },                                          +
+         {                                           +
+             "date": "2025-07-16T10:30:00+00:00",    +
+             "labs": [                               +
+                 {                                   +
+                     "flag": "N",                    +
+                     "test": "CRP",                  +
+                     "value": 2.07                   +
+                 }                                   +
+             ],                                      +
+             "doctor": "Chioma Lawal",               +
+             "status": "COMPLETED",                  +
+             "diagnoses": [                          +
+                 "I10"                               +
+             ],                                      +
+             "department": "Cardiology",             +
+             "medications": [                        +
+                 {                                   +
+                     "qty": 10,                      +
+                     "name": "Amoxicillin",          +
+                     "strength": "500mg"             +
+                 }                                   +
+             ]                                       +
+         },                                          +
+         {                                           +
+             "date": "2025-08-01T13:15:00+00:00",    +
+             "doctor": "Amaka Okafor",               +
+             "status": "CANCELLED",                  +
+             "department": "Obstetrics & Gynaecology"+
+         }                                           +
+     ],                                              +
+     "blood_group": "A-",                            +
+     "hospital_no": "CP00012345"                     +
+ }
+(1 row)
+
+Time: 0.671 ms
+=== D3. GIN index for containment (@>) and jsonpath queries ===
+CREATE INDEX
+Time: 1002.420 ms (00:01.002)
+ANALYZE
+Time: 167.652 ms
+--- D3a. Patients with a SEVERE penicillin allergy (containment, uses GIN)
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on patient_record (actual time=0.141..1.284 rows=241 loops=1)
+   Recheck Cond: (doc @> '{"allergies": [{"allergen": "Penicillin", "severity": "SEVERE"}]}'::jsonb)
+   Rows Removed by Index Recheck: 26
+   Heap Blocks: exact=255
+   ->  Bitmap Index Scan on ix_patient_record_doc (actual time=0.100..0.101 rows=267 loops=1)
+         Index Cond: (doc @> '{"allergies": [{"allergen": "Penicillin", "severity": "SEVERE"}]}'::jsonb)
+ Planning Time: 0.415 ms
+ Execution Time: 1.315 ms
+(8 rows)
+
+Time: 2.193 ms
+ severe_penicillin 
+-------------------
+               241
+(1 row)
+
+Time: 1.693 ms
+--- D3b. Patients ever diagnosed with Type 2 diabetes (E11.9) AND prescribed Metformin
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on patient_record (actual time=1.046..15.965 rows=539 loops=1)
+   Recheck Cond: (doc @> '{"encounters": [{"diagnoses": ["E11.9"], "medications": [{"name": "Metformin"}]}]}'::jsonb)
+   Rows Removed by Index Recheck: 1935
+   Heap Blocks: exact=1868
+   ->  Bitmap Index Scan on ix_patient_record_doc (actual time=0.713..0.713 rows=2474 loops=1)
+         Index Cond: (doc @> '{"encounters": [{"diagnoses": ["E11.9"], "medications": [{"name": "Metformin"}]}]}'::jsonb)
+ Planning Time: 0.241 ms
+ Execution Time: 16.007 ms
+(8 rows)
+
+Time: 16.631 ms
+--- D3c. jsonpath: encounters with an HbA1c result above 45 (filter inside each document)
+ hospital_no |      encounter_date       
+-------------+---------------------------
+ CP00000026  | 2025-12-17T14:15:00+00:00
+ CP00000030  | 2025-12-24T13:45:00+00:00
+ CP00000096  | 2026-03-24T16:15:00+00:00
+ CP00000127  | 2026-05-12T11:00:00+00:00
+ CP00000180  | 2025-09-12T14:30:00+00:00
+(5 rows)
+
+Time: 1.825 ms
+=== D4. Read performance: full history – document (1 row by PK) vs relational (9-table join) ===
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Index Scan using patient_record_pkey on patient_record (actual time=0.016..0.017 rows=1 loops=1)
+   Index Cond: (hospital_no = 'CP00012345'::bpchar)
+ Planning Time: 0.033 ms
+ Execution Time: 0.024 ms
+(4 rows)
+
+Time: 0.326 ms
+=== D5. Schema flexibility: add a new attribute to ONE document without ALTER TABLE ===
+UPDATE 1
+Time: 1.181 ms
+                                   new_field                                    
+--------------------------------------------------------------------------------
+ {"device": "SmartWatch X", "synced": "2026-10-30", "resting_hr": [62, 64, 61]}
+(1 row)
+
+Time: 0.351 ms
+ docs_with_wearable | all_docs 
+--------------------+----------
+                  1 |    20000
+(1 row)
+
+Time: 51.500 ms
+=== D6. The cost of denormalisation: renaming a doctor touches every embedded copy ===
+ documents_mentioning_doctor 
+-----------------------------
+                        2385
+(1 row)
+
+Time: 11.730 ms
+(In the relational model this is a 1-row UPDATE on doctor.)
