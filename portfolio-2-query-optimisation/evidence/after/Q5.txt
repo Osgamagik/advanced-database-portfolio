@@ -1,0 +1,30 @@
+-- Q5 Outstanding (unpaid) invoices older than 30 days – finance chase list
+-- median of 5: 0.166 ms
+
+SELECT i.invoice_id, i.issued_at, i.total_amount, p.hospital_no, p.phone
+FROM clinic.invoice i
+JOIN clinic.appointment a ON a.appointment_id = i.appointment_id
+JOIN clinic.patient p     ON p.patient_id = a.patient_id
+WHERE i.status = 'UNPAID' AND i.issued_at < TIMESTAMPTZ '2026-10-01'
+ORDER BY i.issued_at
+LIMIT 50;
+
+Limit  (cost=0.99..129.11 rows=50 width=47) (actual time=0.013..0.140 rows=50 loops=1)
+  Buffers: shared hit=358
+  ->  Nested Loop  (cost=0.99..22808.06 rows=8901 width=47) (actual time=0.012..0.136 rows=50 loops=1)
+        Buffers: shared hit=358
+        ->  Nested Loop  (cost=0.71..19991.06 rows=8901 width=25) (actual time=0.010..0.074 rows=50 loops=1)
+              Buffers: shared hit=208
+              ->  Index Scan using ix_invoice_unpaid on invoice i  (cost=0.29..7432.88 rows=8901 width=29) (actual time=0.006..0.013 rows=50 loops=1)
+                    Index Cond: (issued_at < '2026-10-01 00:00:00+00'::timestamp with time zone)
+                    Buffers: shared hit=8
+              ->  Index Scan using appointment_pkey on appointment a  (cost=0.42..1.41 rows=1 width=12) (actual time=0.001..0.001 rows=1 loops=50)
+                    Index Cond: (appointment_id = i.appointment_id)
+                    Buffers: shared hit=200
+        ->  Index Scan using patient_pkey on patient p  (cost=0.29..0.32 rows=1 width=30) (actual time=0.001..0.001 rows=1 loops=50)
+              Index Cond: (patient_id = a.patient_id)
+              Buffers: shared hit=150
+Planning:
+  Buffers: shared hit=26
+Planning Time: 0.225 ms
+Execution Time: 0.155 ms

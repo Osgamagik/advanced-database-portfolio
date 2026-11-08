@@ -1,0 +1,68 @@
+-- Q3 Top-3 diagnoses per department in the last 12 months (CTE + window function)
+-- median of 5: 81.568 ms
+
+WITH dx_counts AS (
+    SELECT dep.name AS department, dx.icd10_code, count(*) AS cases
+    FROM clinic.diagnosis dx
+    JOIN clinic.appointment a  ON a.appointment_id = dx.appointment_id
+    JOIN clinic.doctor d       ON d.doctor_id = a.doctor_id
+    JOIN clinic.department dep ON dep.department_id = d.department_id
+    WHERE a.scheduled_start >= TIMESTAMPTZ '2025-10-31'
+    GROUP BY dep.name, dx.icd10_code
+), ranked AS (
+    SELECT *, dense_rank() OVER (PARTITION BY department ORDER BY cases DESC) AS rnk
+    FROM dx_counts
+)
+SELECT department, rnk, icd10_code, cases FROM ranked WHERE rnk <= 3 ORDER BY department, rnk;
+
+Incremental Sort  (cost=7886.88..7895.84 rows=120 width=35) (actual time=80.407..80.415 rows=18 loops=1)
+  Sort Key: ranked.department, ranked.rnk
+  Presorted Key: ranked.department
+  Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 26kB  Peak Memory: 26kB
+  Buffers: shared hit=2452
+  ->  Subquery Scan on ranked  (cost=7886.84..7890.44 rows=120 width=35) (actual time=80.380..80.404 rows=18 loops=1)
+        Buffers: shared hit=2452
+        ->  WindowAgg  (cost=7886.84..7889.24 rows=120 width=35) (actual time=80.379..80.400 rows=18 loops=1)
+              Run Condition: (dense_rank() OVER (?) <= 3)
+              Buffers: shared hit=2452
+              ->  Sort  (cost=7886.84..7887.14 rows=120 width=27) (actual time=80.370..80.378 rows=22 loops=1)
+                    Sort Key: dx_counts.department, dx_counts.cases DESC
+                    Sort Method: quicksort  Memory: 26kB
+                    Buffers: shared hit=2452
+                    ->  Subquery Scan on dx_counts  (cost=7881.50..7882.70 rows=120 width=27) (actual time=80.340..80.354 rows=22 loops=1)
+                          Buffers: shared hit=2452
+                          ->  HashAggregate  (cost=7881.50..7882.70 rows=120 width=27) (actual time=80.338..80.349 rows=22 loops=1)
+                                Group Key: dep.name, dx.icd10_code
+                                Batches: 1  Memory Usage: 40kB
+                                Buffers: shared hit=2452
+                                ->  Hash Join  (cost=4106.74..7368.39 rows=68414 width=19) (actual time=32.576..68.775 rows=63586 loops=1)
+                                      Hash Cond: (d.department_id = dep.department_id)
+                                      Buffers: shared hit=2452
+                                      ->  Hash Join  (cost=4105.56..7092.48 rows=68414 width=7) (actual time=32.562..60.261 rows=63586 loops=1)
+                                            Hash Cond: (a.doctor_id = d.doctor_id)
+                                            Buffers: shared hit=2451
+                                            ->  Hash Join  (cost=4103.20..6897.86 rows=68414 width=9) (actual time=32.543..51.460 rows=63586 loops=1)
+                                                  Hash Cond: (dx.appointment_id = a.appointment_id)
+                                                  Buffers: shared hit=2450
+                                                  ->  Seq Scan on diagnosis dx  (cost=0.00..2488.87 rows=116487 width=13) (actual time=0.002..9.335 rows=116487 loops=1)
+                                                        Buffers: shared hit=1324
+                                                  ->  Hash  (cost=2998.24..2998.24 rows=88397 width=12) (actual time=20.953..20.954 rows=87859 loops=1)
+                                                        Buckets: 131072  Batches: 1  Memory Usage: 4800kB
+                                                        Buffers: shared hit=1126
+                                                        ->  Index Scan using ix_appointment_start on appointment a  (cost=0.29..2998.24 rows=88397 width=12) (actual time=0.009..11.417 rows=87859 loops=1)
+                                                              Index Cond: (scheduled_start >= '2025-10-31 00:00:00+00'::timestamp with time zone)
+                                                              Buffers: shared hit=1126
+                                            ->  Hash  (cost=1.60..1.60 rows=60 width=6) (actual time=0.015..0.016 rows=60 loops=1)
+                                                  Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                                                  Buffers: shared hit=1
+                                                  ->  Seq Scan on doctor d  (cost=0.00..1.60 rows=60 width=6) (actual time=0.003..0.009 rows=60 loops=1)
+                                                        Buffers: shared hit=1
+                                      ->  Hash  (cost=1.08..1.08 rows=8 width=16) (actual time=0.008..0.009 rows=8 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                            Buffers: shared hit=1
+                                            ->  Seq Scan on department dep  (cost=0.00..1.08 rows=8 width=16) (actual time=0.003..0.005 rows=8 loops=1)
+                                                  Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=20
+Planning Time: 0.472 ms
+Execution Time: 80.498 ms
