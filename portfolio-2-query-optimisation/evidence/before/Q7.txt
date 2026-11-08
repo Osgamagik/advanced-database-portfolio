@@ -1,0 +1,69 @@
+-- Q7 Patients with an abnormal (high) HbA1c who have NOT been seen in Endocrinology since
+-- median of 5: 31.227 ms
+
+SELECT DISTINCT p.hospital_no, p.last_name, r.result_value, r.resulted_at
+FROM clinic.lab_result r
+JOIN clinic.lab_order o   ON o.lab_order_id = r.lab_order_id
+JOIN clinic.appointment a ON a.appointment_id = o.appointment_id
+JOIN clinic.patient p     ON p.patient_id = a.patient_id
+WHERE o.test_code = 'HBA1C' AND r.flag = 'H' AND r.resulted_at >= TIMESTAMPTZ '2026-09-01'
+  AND NOT EXISTS (
+        SELECT 1 FROM clinic.appointment a2 JOIN clinic.doctor d2 ON d2.doctor_id = a2.doctor_id
+        WHERE a2.patient_id = p.patient_id AND d2.department_id = 8
+          AND a2.scheduled_start > r.resulted_at)
+ORDER BY r.resulted_at DESC;
+
+Unique  (cost=5543.73..5544.63 rows=72 width=31) (actual time=31.158..31.185 rows=84 loops=1)
+  Buffers: shared hit=3012
+  ->  Sort  (cost=5543.73..5543.91 rows=72 width=31) (actual time=31.158..31.166 rows=84 loops=1)
+        Sort Key: r.resulted_at DESC, p.hospital_no, p.last_name, r.result_value
+        Sort Method: quicksort  Memory: 29kB
+        Buffers: shared hit=3012
+        ->  Hash Right Anti Join  (cost=1796.41..5541.51 rows=72 width=31) (actual time=31.115..31.129 rows=84 loops=1)
+              Hash Cond: (a2.patient_id = p.patient_id)
+              Join Filter: (a2.scheduled_start > r.resulted_at)
+              Rows Removed by Join Filter: 85
+              Buffers: shared hit=3012
+              ->  Hash Join  (cost=1.84..3679.96 rows=17560 width=12) (actual time=0.021..24.201 rows=17647 loops=1)
+                    Hash Cond: (a2.doctor_id = d2.doctor_id)
+                    Buffers: shared hit=1751
+                    ->  Seq Scan on appointment a2  (cost=0.00..3255.12 rows=150512 width=16) (actual time=0.005..11.519 rows=150512 loops=1)
+                          Buffers: shared hit=1750
+                    ->  Hash  (cost=1.75..1.75 rows=7 width=4) (actual time=0.009..0.010 rows=7 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=1
+                          ->  Seq Scan on doctor d2  (cost=0.00..1.75 rows=7 width=4) (actual time=0.004..0.008 rows=7 loops=1)
+                                Filter: (department_id = 8)
+                                Rows Removed by Filter: 53
+                                Buffers: shared hit=1
+              ->  Hash  (cost=1793.30..1793.30 rows=102 width=35) (actual time=5.644..5.647 rows=97 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 15kB
+                    Buffers: shared hit=1261
+                    ->  Nested Loop  (cost=787.43..1793.30 rows=102 width=35) (actual time=4.915..5.621 rows=97 loops=1)
+                          Buffers: shared hit=1261
+                          ->  Nested Loop  (cost=787.14..1761.02 rows=102 width=18) (actual time=4.909..5.423 rows=97 loops=1)
+                                Buffers: shared hit=970
+                                ->  Hash Join  (cost=786.72..1568.02 rows=102 width=22) (actual time=4.896..5.232 rows=97 loops=1)
+                                      Hash Cond: (o.lab_order_id = r.lab_order_id)
+                                      Buffers: shared hit=582
+                                      ->  Seq Scan on lab_order o  (cost=0.00..765.66 rows=5956 width=16) (actual time=0.006..2.610 rows=5937 loops=1)
+                                            Filter: ((test_code)::text = 'HBA1C'::text)
+                                            Rows Removed by Filter: 29076
+                                            Buffers: shared hit=328
+                                      ->  Hash  (cost=779.19..779.19 rows=602 width=22) (actual time=2.127..2.128 rows=616 loops=1)
+                                            Buckets: 1024  Batches: 1  Memory Usage: 42kB
+                                            Buffers: shared hit=254
+                                            ->  Seq Scan on lab_result r  (cost=0.00..779.19 rows=602 width=22) (actual time=1.767..2.057 rows=616 loops=1)
+                                                  Filter: ((resulted_at >= '2026-09-01 00:00:00+00'::timestamp with time zone) AND (flag = 'H'::bpchar))
+                                                  Rows Removed by Filter: 34397
+                                                  Buffers: shared hit=254
+                                ->  Index Scan using appointment_pkey on appointment a  (cost=0.42..1.89 rows=1 width=12) (actual time=0.002..0.002 rows=1 loops=97)
+                                      Index Cond: (appointment_id = o.appointment_id)
+                                      Buffers: shared hit=388
+                          ->  Index Scan using patient_pkey on patient p  (cost=0.29..0.32 rows=1 width=21) (actual time=0.002..0.002 rows=1 loops=97)
+                                Index Cond: (patient_id = a.patient_id)
+                                Buffers: shared hit=291
+Planning:
+  Buffers: shared hit=32
+Planning Time: 0.532 ms
+Execution Time: 31.227 ms

@@ -1,0 +1,41 @@
+-- Q5 Outstanding (unpaid) invoices older than 30 days – finance chase list
+-- median of 5: 52.372 ms
+
+SELECT i.invoice_id, i.issued_at, i.total_amount, p.hospital_no, p.phone
+FROM clinic.invoice i
+JOIN clinic.appointment a ON a.appointment_id = i.appointment_id
+JOIN clinic.patient p     ON p.patient_id = a.patient_id
+WHERE i.status = 'UNPAID' AND i.issued_at < TIMESTAMPTZ '2026-10-01'
+ORDER BY i.issued_at
+LIMIT 50;
+
+Limit  (cost=8512.51..8512.63 rows=50 width=47) (actual time=52.320..52.331 rows=50 loops=1)
+  Buffers: shared hit=3991
+  ->  Sort  (cost=8512.51..8534.43 rows=8770 width=47) (actual time=52.319..52.325 rows=50 loops=1)
+        Sort Key: i.issued_at
+        Sort Method: top-N heapsort  Memory: 28kB
+        Buffers: shared hit=3991
+        ->  Hash Join  (cost=4547.93..8221.18 rows=8770 width=47) (actual time=17.760..50.634 rows=8739 loops=1)
+              Hash Cond: (a.patient_id = p.patient_id)
+              Buffers: shared hit=3991
+              ->  Hash Join  (cost=3722.93..7373.16 rows=8770 width=25) (actual time=11.321..41.736 rows=8739 loops=1)
+                    Hash Cond: (a.appointment_id = i.appointment_id)
+                    Buffers: shared hit=3616
+                    ->  Seq Scan on appointment a  (cost=0.00..3255.12 rows=150512 width=12) (actual time=0.005..12.341 rows=150512 loops=1)
+                          Buffers: shared hit=1750
+                    ->  Hash  (cost=3613.30..3613.30 rows=8770 width=29) (actual time=11.302..11.302 rows=8739 loops=1)
+                          Buckets: 16384  Batches: 1  Memory Usage: 675kB
+                          Buffers: shared hit=1866
+                          ->  Seq Scan on invoice i  (cost=0.00..3613.30 rows=8770 width=29) (actual time=0.005..10.078 rows=8739 loops=1)
+                                Filter: ((issued_at < '2026-10-01 00:00:00+00'::timestamp with time zone) AND ((status)::text = 'UNPAID'::text))
+                                Rows Removed by Filter: 107748
+                                Buffers: shared hit=1866
+              ->  Hash  (cost=575.00..575.00 rows=20000 width=30) (actual time=6.367..6.368 rows=20000 loops=1)
+                    Buckets: 32768  Batches: 1  Memory Usage: 1506kB
+                    Buffers: shared hit=375
+                    ->  Seq Scan on patient p  (cost=0.00..575.00 rows=20000 width=30) (actual time=0.009..2.555 rows=20000 loops=1)
+                          Buffers: shared hit=375
+Planning:
+  Buffers: shared hit=18
+Planning Time: 0.467 ms
+Execution Time: 52.372 ms

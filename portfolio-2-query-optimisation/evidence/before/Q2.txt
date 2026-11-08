@@ -1,0 +1,34 @@
+-- Q2 A doctor's schedule for one day (most frequent query in the clinic)
+-- median of 5: 1.558 ms
+
+SELECT a.appointment_id, a.scheduled_start, a.status, p.hospital_no, p.first_name, p.last_name
+FROM clinic.appointment a
+JOIN clinic.patient p ON p.patient_id = a.patient_id
+WHERE a.doctor_id = 17
+  AND a.scheduled_start >= TIMESTAMPTZ '2026-11-03 00:00'
+  AND a.scheduled_start <  TIMESTAMPTZ '2026-11-04 00:00'
+  AND a.status <> 'CANCELLED'
+ORDER BY a.scheduled_start;
+
+Sort  (cost=2031.06..2031.07 rows=3 width=47) (actual time=1.393..1.394 rows=2 loops=1)
+  Sort Key: a.scheduled_start
+  Sort Method: quicksort  Memory: 25kB
+  Buffers: shared hit=1395
+  ->  Nested Loop  (cost=117.55..2031.03 rows=3 width=47) (actual time=1.316..1.388 rows=2 loops=1)
+        Buffers: shared hit=1395
+        ->  Bitmap Heap Scan on appointment a  (cost=117.26..2006.12 rows=3 width=29) (actual time=1.299..1.367 rows=2 loops=1)
+              Recheck Cond: ((doctor_id = 17) AND ((status)::text <> 'CANCELLED'::text))
+              Filter: ((scheduled_start >= '2026-11-03 00:00:00+00'::timestamp with time zone) AND (scheduled_start < '2026-11-04 00:00:00+00'::timestamp with time zone))
+              Rows Removed by Filter: 2322
+              Heap Blocks: exact=1360
+              Buffers: shared hit=1389
+              ->  Bitmap Index Scan on no_doctor_double_booking  (cost=0.00..117.26 rows=2264 width=0) (actual time=0.171..0.171 rows=2324 loops=1)
+                    Index Cond: (doctor_id = 17)
+                    Buffers: shared hit=29
+        ->  Index Scan using patient_pkey on patient p  (cost=0.29..8.30 rows=1 width=26) (actual time=0.008..0.008 rows=1 loops=2)
+              Index Cond: (patient_id = a.patient_id)
+              Buffers: shared hit=6
+Planning:
+  Buffers: shared hit=6
+Planning Time: 0.147 ms
+Execution Time: 1.415 ms

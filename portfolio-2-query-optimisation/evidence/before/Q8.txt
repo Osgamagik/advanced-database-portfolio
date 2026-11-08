@@ -1,0 +1,39 @@
+-- Q8 No-show rate per doctor in 2026 (aggregate + FILTER)
+-- median of 5: 32.619 ms
+
+SELECT d.doctor_id, d.last_name,
+       count(*) FILTER (WHERE a.status = 'NO_SHOW')                          AS no_shows,
+       count(*)                                                              AS total,
+       round(100.0 * count(*) FILTER (WHERE a.status = 'NO_SHOW') / count(*), 2) AS no_show_pct
+FROM clinic.appointment a JOIN clinic.doctor d ON d.doctor_id = a.doctor_id
+WHERE a.scheduled_start >= TIMESTAMPTZ '2026-01-01' AND a.scheduled_start < TIMESTAMPTZ '2026-10-31'
+GROUP BY d.doctor_id, d.last_name
+ORDER BY no_show_pct DESC
+LIMIT 10;
+
+Limit  (cost=4807.42..4807.45 rows=10 width=58) (actual time=27.794..27.798 rows=10 loops=1)
+  Buffers: shared hit=1751
+  ->  Sort  (cost=4807.42..4807.57 rows=60 width=58) (actual time=27.793..27.795 rows=10 loops=1)
+        Sort Key: (round(((100.0 * (count(*) FILTER (WHERE ((a.status)::text = 'NO_SHOW'::text)))::numeric) / (count(*))::numeric), 2)) DESC
+        Sort Method: top-N heapsort  Memory: 26kB
+        Buffers: shared hit=1751
+        ->  HashAggregate  (cost=4804.78..4806.13 rows=60 width=58) (actual time=27.740..27.768 rows=60 loops=1)
+              Group Key: d.doctor_id
+              Batches: 1  Memory Usage: 24kB
+              Buffers: shared hit=1751
+              ->  Hash Join  (cost=2.35..4184.39 rows=62039 width=19) (actual time=4.452..20.475 rows=62600 loops=1)
+                    Hash Cond: (a.doctor_id = d.doctor_id)
+                    Buffers: shared hit=1751
+                    ->  Seq Scan on appointment a  (cost=0.00..4007.68 rows=62039 width=13) (actual time=4.421..11.345 rows=62600 loops=1)
+                          Filter: ((scheduled_start >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (scheduled_start < '2026-10-31 00:00:00+00'::timestamp with time zone))
+                          Rows Removed by Filter: 87912
+                          Buffers: shared hit=1750
+                    ->  Hash  (cost=1.60..1.60 rows=60 width=10) (actual time=0.022..0.023 rows=60 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                          Buffers: shared hit=1
+                          ->  Seq Scan on doctor d  (cost=0.00..1.60 rows=60 width=10) (actual time=0.008..0.013 rows=60 loops=1)
+                                Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=7
+Planning Time: 0.200 ms
+Execution Time: 27.830 ms

@@ -1,0 +1,90 @@
+-- Q1 Full clinical history of one patient (reception / doctor screen)
+-- median of 5: 32.066 ms
+
+SELECT a.scheduled_start, a.status, d.last_name AS doctor, dep.name AS department,
+       dx.icd10_code, c.description, string_agg(m.name || ' ' || m.strength, ', ') AS medications
+FROM clinic.patient p
+JOIN clinic.appointment a  ON a.patient_id = p.patient_id
+JOIN clinic.doctor d       ON d.doctor_id = a.doctor_id
+JOIN clinic.department dep ON dep.department_id = d.department_id
+LEFT JOIN clinic.diagnosis dx  ON dx.appointment_id = a.appointment_id
+LEFT JOIN clinic.icd10_code c  ON c.code = dx.icd10_code
+LEFT JOIN clinic.prescription pr ON pr.appointment_id = a.appointment_id
+LEFT JOIN clinic.prescription_item pi ON pi.prescription_id = pr.prescription_id
+LEFT JOIN clinic.medication m  ON m.medication_id = pi.medication_id
+WHERE p.hospital_no = 'CP00012345'
+GROUP BY a.appointment_id, a.scheduled_start, a.status, d.last_name, dep.name, dx.icd10_code, c.description
+ORDER BY a.scheduled_start DESC;
+
+Sort  (cost=5146.24..5146.27 rows=12 width=110) (actual time=31.984..31.991 rows=6 loops=1)
+  Sort Key: a.scheduled_start DESC
+  Sort Method: quicksort  Memory: 25kB
+  Buffers: shared hit=2323
+  ->  GroupAggregate  (cost=5145.60..5146.02 rows=12 width=110) (actual time=31.970..31.983 rows=6 loops=1)
+        Group Key: a.appointment_id, d.last_name, dep.name, dx.icd10_code, c.description
+        Buffers: shared hit=2323
+        ->  Sort  (cost=5145.60..5145.63 rows=12 width=95) (actual time=31.960..31.967 rows=7 loops=1)
+              Sort Key: a.appointment_id, d.last_name, dep.name, dx.icd10_code, c.description
+              Sort Method: quicksort  Memory: 25kB
+              Buffers: shared hit=2323
+              ->  Hash Left Join  (cost=3662.22..5145.39 rows=12 width=95) (actual time=23.309..31.949 rows=7 loops=1)
+                    Hash Cond: (pi.medication_id = m.medication_id)
+                    Buffers: shared hit=2323
+                    ->  Nested Loop Left Join  (cost=3660.89..5144.00 rows=12 width=82) (actual time=23.284..31.920 rows=7 loops=1)
+                          Buffers: shared hit=2322
+                          ->  Nested Loop Left Join  (cost=3660.59..5140.64 rows=8 width=86) (actual time=23.274..31.896 rows=6 loops=1)
+                                Buffers: shared hit=2313
+                                ->  Nested Loop Left Join  (cost=3660.46..5139.43 rows=8 width=58) (actual time=23.266..31.874 rows=6 loops=1)
+                                      Buffers: shared hit=2303
+                                      ->  Hash Join  (cost=3660.04..5135.49 rows=8 width=53) (actual time=23.253..31.832 rows=6 loops=1)
+                                            Hash Cond: (d.department_id = dep.department_id)
+                                            Buffers: shared hit=2280
+                                            ->  Nested Loop  (cost=3658.86..5134.28 rows=8 width=41) (actual time=23.239..31.814 rows=6 loops=1)
+                                                  Buffers: shared hit=2279
+                                                  ->  Hash Right Join  (cost=3658.72..5133.02 rows=8 width=37) (actual time=23.222..31.778 rows=6 loops=1)
+                                                        Hash Cond: (pr.appointment_id = a.appointment_id)
+                                                        Buffers: shared hit=2267
+                                                        ->  Seq Scan on prescription pr  (cost=0.00..1212.37 rows=69837 width=16) (actual time=0.007..4.902 rows=69837 loops=1)
+                                                              Buffers: shared hit=514
+                                                        ->  Hash  (cost=3658.62..3658.62 rows=8 width=29) (actual time=22.079..22.081 rows=6 loops=1)
+                                                              Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                              Buffers: shared hit=1753
+                                                              ->  Hash Join  (cost=8.32..3658.62 rows=8 width=29) (actual time=2.417..22.074 rows=6 loops=1)
+                                                                    Hash Cond: (a.patient_id = p.patient_id)
+                                                                    Buffers: shared hit=1753
+                                                                    ->  Seq Scan on appointment a  (cost=0.00..3255.12 rows=150512 width=33) (actual time=0.003..11.556 rows=150512 loops=1)
+                                                                          Buffers: shared hit=1750
+                                                                    ->  Hash  (cost=8.30..8.30 rows=1 width=4) (actual time=0.009..0.010 rows=1 loops=1)
+                                                                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                                          Buffers: shared hit=3
+                                                                          ->  Index Scan using patient_hospital_no_key on patient p  (cost=0.29..8.30 rows=1 width=4) (actual time=0.008..0.008 rows=1 loops=1)
+                                                                                Index Cond: (hospital_no = 'CP00012345'::bpchar)
+                                                                                Buffers: shared hit=3
+                                                  ->  Index Scan using doctor_pkey on doctor d  (cost=0.14..0.16 rows=1 width=12) (actual time=0.003..0.003 rows=1 loops=6)
+                                                        Index Cond: (doctor_id = a.doctor_id)
+                                                        Buffers: shared hit=12
+                                            ->  Hash  (cost=1.08..1.08 rows=8 width=16) (actual time=0.008..0.009 rows=8 loops=1)
+                                                  Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                                                  Buffers: shared hit=1
+                                                  ->  Seq Scan on department dep  (cost=0.00..1.08 rows=8 width=16) (actual time=0.004..0.005 rows=8 loops=1)
+                                                        Buffers: shared hit=1
+                                      ->  Index Only Scan using diagnosis_appointment_id_icd10_code_key on diagnosis dx  (cost=0.42..0.48 rows=1 width=13) (actual time=0.005..0.006 rows=1 loops=6)
+                                            Index Cond: (appointment_id = a.appointment_id)
+                                            Heap Fetches: 5
+                                            Buffers: shared hit=23
+                                ->  Index Scan using icd10_code_pkey on icd10_code c  (cost=0.14..0.15 rows=1 width=33) (actual time=0.002..0.002 rows=1 loops=6)
+                                      Index Cond: ((code)::text = (dx.icd10_code)::text)
+                                      Buffers: shared hit=10
+                          ->  Index Only Scan using prescription_item_pkey on prescription_item pi  (cost=0.29..0.40 rows=2 width=12) (actual time=0.003..0.003 rows=1 loops=6)
+                                Index Cond: (prescription_id = pr.prescription_id)
+                                Heap Fetches: 4
+                                Buffers: shared hit=9
+                    ->  Hash  (cost=1.15..1.15 rows=15 width=21) (actual time=0.015..0.016 rows=15 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=1
+                          ->  Seq Scan on medication m  (cost=0.00..1.15 rows=15 width=21) (actual time=0.007..0.009 rows=15 loops=1)
+                                Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=63
+Planning Time: 1.273 ms
+Execution Time: 32.056 ms

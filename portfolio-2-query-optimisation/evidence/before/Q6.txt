@@ -1,0 +1,18 @@
+-- Q6 Case-insensitive patient search by surname prefix (reception search box)
+-- median of 5: 1.774 ms
+
+SELECT patient_id, hospital_no, first_name, last_name, date_of_birth
+FROM clinic.patient
+WHERE lower(last_name) LIKE 'oke%' AND date_of_birth BETWEEN DATE '1980-01-01' AND DATE '1985-12-31'
+ORDER BY last_name, first_name;
+
+Sort  (cost=775.12..775.14 rows=8 width=30) (actual time=1.755..1.761 rows=125 loops=1)
+  Sort Key: last_name, first_name
+  Sort Method: quicksort  Memory: 31kB
+  Buffers: shared hit=375
+  ->  Seq Scan on patient  (cost=0.00..775.00 rows=8 width=30) (actual time=0.014..1.694 rows=125 loops=1)
+        Filter: ((date_of_birth >= '1980-01-01'::date) AND (date_of_birth <= '1985-12-31'::date) AND (lower((last_name)::text) ~~ 'oke%'::text))
+        Rows Removed by Filter: 19875
+        Buffers: shared hit=375
+Planning Time: 0.040 ms
+Execution Time: 1.774 ms

@@ -1,0 +1,60 @@
+-- Q4 Monthly revenue collected per department for 2026
+-- median of 5: 150.380 ms
+
+SELECT date_trunc('month', pay.paid_at) AS month, dep.name AS department, sum(pay.amount) AS revenue
+FROM clinic.payment pay
+JOIN clinic.invoice i      ON i.invoice_id = pay.invoice_id
+JOIN clinic.appointment a  ON a.appointment_id = i.appointment_id
+JOIN clinic.doctor d       ON d.doctor_id = a.doctor_id
+JOIN clinic.department dep ON dep.department_id = d.department_id
+WHERE pay.paid_at >= TIMESTAMPTZ '2026-01-01' AND pay.paid_at < TIMESTAMPTZ '2027-01-01'
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+GroupAggregate  (cost=16348.34..17586.49 rows=49526 width=54) (actual time=141.297..150.511 rows=88 loops=1)
+  Group Key: (date_trunc('month'::text, pay.paid_at)), dep.name
+  Buffers: shared hit=4513
+  ->  Sort  (cost=16348.34..16472.15 rows=49526 width=27) (actual time=141.120..144.032 rows=49468 loops=1)
+        Sort Key: (date_trunc('month'::text, pay.paid_at)), dep.name
+        Sort Method: quicksort  Memory: 3904kB
+        Buffers: shared hit=4513
+        ->  Hash Join  (cost=7709.65..12486.33 rows=49526 width=27) (actual time=79.992..126.082 rows=49468 loops=1)
+              Hash Cond: (d.department_id = dep.department_id)
+              Buffers: shared hit=4513
+              ->  Hash Join  (cost=7708.47..12162.45 rows=49526 width=15) (actual time=79.967..113.461 rows=49468 loops=1)
+                    Hash Cond: (a.doctor_id = d.doctor_id)
+                    Buffers: shared hit=4512
+                    ->  Hash Join  (cost=7706.12..12020.92 rows=49526 width=17) (actual time=79.947..106.249 rows=49468 loops=1)
+                          Hash Cond: (a.appointment_id = i.appointment_id)
+                          Buffers: shared hit=4511
+                          ->  Seq Scan on appointment a  (cost=0.00..3255.12 rows=150512 width=12) (actual time=0.002..12.593 rows=150512 loops=1)
+                                Buffers: shared hit=1750
+                          ->  Hash  (cost=7087.04..7087.04 rows=49526 width=21) (actual time=62.486..62.488 rows=49468 loops=1)
+                                Buckets: 65536  Batches: 1  Memory Usage: 3218kB
+                                Buffers: shared hit=2761
+                                ->  Hash Join  (cost=3124.09..7087.04 rows=49526 width=21) (actual time=19.758..54.496 rows=49468 loops=1)
+                                      Hash Cond: (i.invoice_id = pay.invoice_id)
+                                      Buffers: shared hit=2761
+                                      ->  Seq Scan on invoice i  (cost=0.00..3030.87 rows=116487 width=16) (actual time=0.002..10.049 rows=116487 loops=1)
+                                            Buffers: shared hit=1866
+                                      ->  Hash  (cost=2505.01..2505.01 rows=49526 width=21) (actual time=16.595..16.596 rows=49468 loops=1)
+                                            Buckets: 65536  Batches: 1  Memory Usage: 3218kB
+                                            Buffers: shared hit=895
+                                            ->  Seq Scan on payment pay  (cost=0.00..2505.01 rows=49526 width=21) (actual time=3.710..9.783 rows=49468 loops=1)
+                                                  Filter: ((paid_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (paid_at < '2027-01-01 00:00:00+00'::timestamp with time zone))
+                                                  Rows Removed by Filter: 57866
+                                                  Buffers: shared hit=895
+                    ->  Hash  (cost=1.60..1.60 rows=60 width=6) (actual time=0.015..0.016 rows=60 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                          Buffers: shared hit=1
+                          ->  Seq Scan on doctor d  (cost=0.00..1.60 rows=60 width=6) (actual time=0.002..0.009 rows=60 loops=1)
+                                Buffers: shared hit=1
+              ->  Hash  (cost=1.08..1.08 rows=8 width=16) (actual time=0.010..0.011 rows=8 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                    Buffers: shared hit=1
+                    ->  Seq Scan on department dep  (cost=0.00..1.08 rows=8 width=16) (actual time=0.005..0.006 rows=8 loops=1)
+                          Buffers: shared hit=1
+Planning:
+  Buffers: shared hit=28
+Planning Time: 0.420 ms
+Execution Time: 150.920 ms
