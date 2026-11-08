@@ -1,0 +1,96 @@
+PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+
+====================================================================================================
+C1. LOST UPDATE – two pharmacists dispense Paracetamol at the same time (READ COMMITTED)
+====================================================================================================
+  [  0.04s] setup    stock = 1000; pharmacist A dispenses 28, pharmacist B dispenses 56 -> expected 916
+  [  0.06s] A        reads stock = 1000
+  [  0.07s] B        reads stock = 1000
+  [  0.07s] B        writes 1000 - 56 = 944 and COMMITs
+  [  0.07s] A        writes 1000 - 28 = 972 and COMMITs
+  [  0.08s] result   final stock = 972  (expected 916) -> B's update was LOST: 56 tablets unaccounted for
+
+  --- Fix A: let the DBMS do read-modify-write atomically: UPDATE ... SET stock_qty = stock_qty - n
+  [  0.11s] B        stock_qty - 56 -> 944
+  [  0.11s] A        stock_qty - 28 -> 916
+  [  0.12s] result   final stock = 916  (expected 916) -> correct; the 2nd UPDATE waited for the row lock and re-read the row
+
+  --- Fix B: pessimistic locking – SELECT ... FOR UPDATE (B must wait for A)
+  [  0.15s] A        SELECT ... FOR UPDATE -> 1000 (row now locked)
+  [  0.16s] B        SELECT ... FOR UPDATE -> blocks ...
+  [  0.67s] monitor  pg_locks while B is blocked:
+  [  0.67s]              pharm_A  ExclusiveLock  granted=True
+  [  0.67s]              pharm_B  AccessExclusiveLock granted=True
+  [  0.67s]              pharm_B  ShareLock      granted=False
+  [  0.68s] A        writes 972, COMMIT (lock released)
+  [  0.68s] B        ... unblocked after 0.52s, reads 972 (A's committed value)
+  [  0.68s] B        writes 916, COMMIT
+  [  0.70s] result   final stock = 916  (expected 916) -> correct
+
+  --- Fix C: optimistic – REPEATABLE READ; the second writer gets a serialization failure and RETRIES
+  [  0.73s] A        attempt 1: reads 1000
+  [  0.74s] B        reads 1000, writes 944, COMMIT
+  [  0.74s] A        attempt 1: ERROR 40001 could not serialize access due to concurrent update -> ROLLBACK and retry
+  [  0.76s] A        attempt 2: reads 944
+  [  0.76s] A        attempt 2: writes 916, COMMIT
+  [  0.78s] result   final stock = 916  (expected 916) -> correct
+
+====================================================================================================
+C2. NON-REPEATABLE READ – finance totals an invoice twice while reception edits it (READ COMMITTED)
+====================================================================================================
+  [  0.83s] finance  read #1 total = 45.00
+  [  0.84s] recept   adds a £15 lab test -> total 60, COMMIT
+  [  0.84s] finance  read #2 total = 60.00  (same transaction)
+  [  0.84s] result   ANOMALY: value changed inside one transaction
+
+====================================================================================================
+C2. NON-REPEATABLE READ – finance totals an invoice twice while reception edits it (REPEATABLE READ)
+====================================================================================================
+  [  0.87s] finance  read #1 total = 45.00
+  [  0.88s] recept   adds a £15 lab test -> total 60, COMMIT
+  [  0.89s] finance  read #2 total = 45.00  (same transaction)
+  [  0.89s] result   PREVENTED: snapshot taken at first read is stable
+
+====================================================================================================
+C3. WRITE SKEW – two cardiologists both ask to come off call (REPEATABLE READ)
+====================================================================================================
+  [  0.92s] setup    Business rule: at least ONE cardiologist must stay on call for 2026-12-25; doctors 2 and 10 are on call
+  [  0.93s] dr_10    sees 2 on call -> OK to leave
+  [  0.93s] dr_2     sees 2 on call -> OK to leave
+  [  1.14s] dr_2     COMMIT ok
+  [  1.54s] dr_10    COMMIT ok
+  [  1.55s] result   doctors on call = 0 -> RULE VIOLATED (write skew)
+
+====================================================================================================
+C3. WRITE SKEW – two cardiologists both ask to come off call (SERIALIZABLE)
+====================================================================================================
+  [  1.58s] setup    Business rule: at least ONE cardiologist must stay on call for 2026-12-25; doctors 2 and 10 are on call
+  [  1.59s] dr_2     sees 2 on call -> OK to leave
+  [  1.59s] dr_10    sees 2 on call -> OK to leave
+  [  1.79s] dr_2     COMMIT ok
+  [  2.19s] dr_10    ERROR 40001: could not serialize access due to read/write dependencies among transactions
+  [  2.21s] result   doctors on call = 1 -> rule preserved (SSI aborted one transaction)
+
+====================================================================================================
+C4. CONCURRENT DOUBLE-BOOKING – two receptionists book Dr 5 at 2027-02-01 10:00 simultaneously
+====================================================================================================
+  [  2.25s] recept_A INSERT ok (appointment 160517) after 0.00s – not yet committed
+  [  3.25s] recept_A COMMIT
+  [  3.25s] recept_B blocked 1.00s, then ERROR 23P01: conflicting key value violates exclusion constraint "no_doctor_double_booking"
+  [  3.27s] result   appointments in that slot = 1 -> the EXCLUDE constraint serialised the two inserts (B waited for A's outcome)
+
+====================================================================================================
+C5. DEADLOCK – A updates Amoxicillin then Ibuprofen; B updates Ibuprofen then Amoxicillin
+====================================================================================================
+  [  3.29s] B        locked Ibuprofen
+  [  3.30s] A        locked Amoxicillin
+  [  3.30s] A        requests Ibuprofen ...
+  [  3.30s] B        requests Amoxicillin ...
+  [  3.80s] B        ERROR 40P01 deadlock detected -> chosen as VICTIM, ROLLBACK
+  [  3.80s] A        locked Ibuprofen, COMMIT
+
+  --- Fix: every transaction locks rows in the SAME order (ORDER BY medication_id ... FOR UPDATE)
+  [  3.82s] B        both rows updated, COMMIT (no deadlock)
+  [  3.82s] A        both rows updated, COMMIT (no deadlock)
+
+All scenarios complete.

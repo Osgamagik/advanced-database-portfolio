@@ -1,0 +1,89 @@
+SET
+CREATE PROCEDURE
+CREATE PROCEDURE
+================ T1. COMMIT: complete a consultation (3 statements, 1 unit of work) ================
+Appointment 137871 before:
+ appointment_id | status 
+----------------+--------
+         137871 | BOOKED
+(1 row)
+
+BEGIN
+CALL
+COMMIT
+After COMMIT – appointment, diagnosis and invoice all exist:
+ appointment_id |  status   | icd10_code | total_amount 
+----------------+-----------+------------+--------------
+         137871 | COMPLETED | I10        |        45.00
+(1 row)
+
+================ T2. ROLLBACK on error: completing the SAME appointment again fails ================
+(Atomicity: the procedure raises an exception, so nothing is half-written)
+BEGIN
+psql:transactions.sql:47: ERROR:  Appointment 137871 is not in BOOKED state
+CONTEXT:  PL/pgSQL function complete_consultation(bigint,character varying,numeric) line 5 at RAISE
+ROLLBACK
+ diagnoses_for_appt 
+--------------------
+                  1
+(1 row)
+
+================ T3. ROLLBACK by CHECK constraint: dispensing more antivenom than in stock ================
+BEGIN
+INSERT 0 1
+INSERT 0 2
+COMMIT
+Stock before:
+      name      | stock_qty 
+----------------+-----------
+ Paracetamol    |    100000
+ Rare Antivenom |         3
+(2 rows)
+
+BEGIN
+psql:transactions.sql:61: ERROR:  new row for relation "medication" violates check constraint "medication_stock_qty_check"
+DETAIL:  Failing row contains (15, Rare Antivenom, INJECTION, 10ml, 250.00, -2).
+CONTEXT:  SQL statement "UPDATE medication m SET stock_qty = m.stock_qty - pi.quantity
+    FROM prescription_item pi
+    WHERE pi.prescription_id = p_rx AND pi.medication_id = m.medication_id"
+PL/pgSQL function dispense_prescription(bigint) line 3 at SQL statement
+ROLLBACK
+Stock after – Paracetamol was NOT decremented either (all-or-nothing):
+      name      | stock_qty 
+----------------+-----------
+ Paracetamol    |    100000
+ Rare Antivenom |         3
+(2 rows)
+
+ prescription_id | dispensed 
+-----------------+-----------
+           69838 | f
+(1 row)
+
+================ T4. SAVEPOINT: order 3 lab tests, one has an invalid code – keep the valid ones ================
+BEGIN
+INSERT 0 1
+SAVEPOINT
+psql:transactions.sql:71: ERROR:  insert or update on table "lab_order" violates foreign key constraint "lab_order_test_code_fkey"
+DETAIL:  Key (test_code)=(XRAY) is not present in table "lab_test".
+ROLLBACK
+INSERT 0 1
+COMMIT
+ lab_order_id | test_code | status  
+--------------+-----------+---------
+        35014 | FBC       | ORDERED
+        35016 | HBA1C     | ORDERED
+(2 rows)
+
+================ T5. Durability check: data committed in T1 is visible from a NEW session ================
+You are now connected to database "carepoint" as user "postgres".
+ appointment_id |  status   
+----------------+-----------
+         137871 | COMPLETED
+(1 row)
+
+ action | row_pk |  old   |    new    |          changed_at           
+--------+--------+--------+-----------+-------------------------------
+ UPDATE | 137871 | BOOKED | COMPLETED | 2026-10-31 09:24:21.336775+00
+(1 row)
+
