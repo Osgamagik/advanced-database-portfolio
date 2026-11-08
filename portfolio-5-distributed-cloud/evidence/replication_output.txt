@@ -1,0 +1,137 @@
+
+==================================================================================
+R1. Initialise PRIMARY (node1 :5440) with replication settings
+==================================================================================
+primary started
+copying CarePoint data from :5432 (pg_dump | psql) ...
+appointments on primary: 150512
+replication slot: node2_manchester
+
+==================================================================================
+R2. Create HOT STANDBY (node2 :5441) with pg_basebackup -R (writes standby.signal + primary_conninfo)
+==================================================================================
+primary_conninfo in postgresql.auto.conf:
+primary_conninfo = 'user=replicator passfile=''/var/lib/postgresql/.pgpass'' channel_binding=prefer host=127.0.0.1 port=5440 sslmode=prefer sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable'
+/tmp/carepoint-lab/node_5441/standby.signal
+standby started
+
+==================================================================================
+R3. Replication status – on PRIMARY (pg_stat_replication) and STANDBY (pg_stat_wal_receiver)
+==================================================================================
+ application_name | client_addr |   state   | sync_state | sent_lsn  | replay_lsn 
+------------------+-------------+-----------+------------+-----------+------------
+ node2_manchester | 127.0.0.1   | streaming | async      | 0/8000000 | 0/8000000
+(1 row)
+
+  status   | sender_port |    slot_name     | received_tli 
+-----------+-------------+------------------+--------------
+ streaming |        5440 | node2_manchester |            1
+(1 row)
+
+standby pg_is_in_recovery() = true
+
+==================================================================================
+R4. Data written on the PRIMARY appears on the STANDBY (read replica)
+==================================================================================
+ patient_id | hospital_no 
+------------+-------------
+      20003 | CP90000001
+(1 row)
+
+INSERT 0 1
+-- read on standby:
+ patient_id | hospital_no | first_name |    city    
+------------+-------------+------------+------------
+      20003 | CP90000001  | Replica    | Manchester
+(1 row)
+
+
+==================================================================================
+R5. The STANDBY is read-only – writes are rejected
+==================================================================================
+ERROR:  cannot execute INSERT in a read-only transaction
+
+==================================================================================
+R6. Read scaling – the Portfolio 2 analytical query (Q3) runs on the replica, offloading the primary
+==================================================================================
+Timing is on.
+       name       | consultations 
+------------------+---------------
+ General Practice |         15649
+ Cardiology       |         15494
+ Paediatrics      |         15363
+(3 rows)
+
+Time: 116.190 ms
+
+==================================================================================
+R7. Replication lag under a write burst (ASYNC) – 20,000 appointment status updates
+==================================================================================
+lag sample 1: 0 bytes behind, replay_lag=00:00:00.020865
+lag sample 2: 9663 kB behind, replay_lag=00:00:00.029565
+lag sample 3: 6351 kB behind, replay_lag=00:00:00.212203
+lag sample 4: 0 bytes behind, replay_lag=00:00:00.147214
+lag sample 5: 0 bytes behind, replay_lag=00:00:00.147214
+lag sample 6: 0 bytes behind, replay_lag=00:00:00.147214
+after burst: 0 bytes behind (caught up)
+
+==================================================================================
+R8. SYNCHRONOUS replication – commit waits for the standby (stronger consistency / durability)
+==================================================================================
+ application_name | sync_state 
+------------------+------------
+ node2_manchester | sync
+(1 row)
+
+-- 200 single-row commits, ASYNC vs SYNC (each commit = 1 transaction):
+ASYNC: 117 ms
+SYNC : 168 ms   (same machine; across real sites each commit also pays the network round-trip)
+
+==================================================================================
+R9. CAP in practice – SYNC mode with the standby DOWN: primary stays up but commits BLOCK (C over A)
+==================================================================================
+standby stopped (simulated network partition / site failure)
+connected standbys: 0
+-- a clinician saves a record (runs in background) ...
+   after 3 s the session is still waiting: pid=1918 wait_event=SyncRep state=active
+-- operator cancels the wait (statement_timeout cannot interrupt a sync-rep commit wait):
+   client saw: WARNING:  canceling wait for synchronous replication due to user request
+   client saw: DETAIL:  The transaction has already committed locally, but might not have been replicated to the standby.
+   client saw: INSERT 0 1
+-- i.e. the row is committed LOCALLY on the primary but NOT confirmed on any replica – the client cannot be told it is safe
+-- switching back to ASYNC restores availability (A over C – risk of losing the last commits on failover):
+ code  
+-------
+ Z00.1
+(1 row)
+
+INSERT 0 1
+standby restarted – it reconnects and replays the WAL it missed (slot retained it):
+ code  |            description            
+-------+-----------------------------------
+ Z00.0 | General adult medical examination
+ Z00.1 | Routine child health examination
+(2 rows)
+
+
+==================================================================================
+R10. FAILOVER – primary site fails; promote the standby
+==================================================================================
+last patient on primary before failure: CP90000001
+PRIMARY CRASHED (pg_ctl stop -m immediate)
+pg_promote() -> true
+promotion took 138 ms
+node2 pg_is_in_recovery() = false  (now a read-write PRIMARY)
+ hospital_no 
+-------------
+ CP90000003
+(1 row)
+
+INSERT 0 1
+timeline: 2  (was 1 – promotion starts a new WAL timeline so old and new histories cannot be confused)
+(Old node1 must NOT simply restart as primary – that would cause split-brain. It is rebuilt as a standby with pg_rewind/pg_basebackup.)
+
+==================================================================================
+Clean-up
+==================================================================================
+lab nodes stopped; data in /tmp/carepoint-lab

@@ -1,0 +1,123 @@
+
+==================================================================================
+S1. Start coordinator + 2 shard nodes
+==================================================================================
+node :5450 up
+node :5451 up
+node :5452 up
+
+==================================================================================
+S2. Create the physical partitions on each shard
+==================================================================================
+shard :5451 -> appointment_p0
+shard :5451 -> appointment_p1
+shard :5452 -> appointment_p2
+shard :5452 -> appointment_p3
+
+==================================================================================
+S3. Coordinator: partitioned parent table; each partition is a FOREIGN TABLE on a shard
+==================================================================================
+Partition key: HASH (patient_id)
+Partitions: appointment_p0 FOR VALUES WITH (modulus 4, remainder 0), FOREIGN,
+            appointment_p1 FOR VALUES WITH (modulus 4, remainder 1), FOREIGN,
+            appointment_p2 FOR VALUES WITH (modulus 4, remainder 2), FOREIGN,
+            appointment_p3 FOR VALUES WITH (modulus 4, remainder 3), FOREIGN
+
+
+==================================================================================
+S4. Load 150k appointments through the coordinator (rows are ROUTED to shards by hash(patient_id))
+==================================================================================
+
+real	0m9.638s
+user	0m0.022s
+sys	0m0.022s
+-- rows per node (queried directly on each shard):
+shard1 :5451  p0=37455  p1=38158
+shard2 :5452  p2=37614  p3=37285
+coordinator total = 150512
+
+==================================================================================
+S5. Shard-local query: one patient's history -> partition PRUNING, only ONE shard is contacted
+==================================================================================
+                                                                                        QUERY PLAN                                                                                         
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Output: appointment.appointment_id, appointment.patient_id, appointment.doctor_id, appointment.scheduled_start, appointment.scheduled_end, appointment.status, appointment.reason
+   Sort Key: appointment.scheduled_start
+   ->  Foreign Scan on public.appointment_p0 appointment
+         Output: appointment.appointment_id, appointment.patient_id, appointment.doctor_id, appointment.scheduled_start, appointment.scheduled_end, appointment.status, appointment.reason
+         Remote SQL: SELECT appointment_id, patient_id, doctor_id, scheduled_start, scheduled_end, status, reason FROM public.appointment_p0 WHERE ((patient_id = 12345))
+(6 rows)
+
+ appointment_id |    scheduled_start     |  status   
+----------------+------------------------+-----------
+          15834 | 2025-03-19 10:30:00+00 | COMPLETED
+          17925 | 2025-03-28 14:00:00+00 | COMPLETED
+          30199 | 2025-05-28 14:00:00+01 | COMPLETED
+(3 rows)
+
+
+==================================================================================
+S6. Cross-shard (scatter-gather) query: appointments by status -> all 4 partitions on both shards, partial aggregates merged on the coordinator
+==================================================================================
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Finalize HashAggregate
+   Output: appointment.status, count(*)
+   Group Key: appointment.status
+   ->  Append
+         ->  Partial HashAggregate
+               Output: appointment.status, PARTIAL count(*)
+               Group Key: appointment.status
+               ->  Foreign Scan on public.appointment_p0 appointment
+                     Output: appointment.status
+                     Remote SQL: SELECT status FROM public.appointment_p0
+         ->  Partial HashAggregate
+               Output: appointment_1.status, PARTIAL count(*)
+               Group Key: appointment_1.status
+               ->  Foreign Scan on public.appointment_p1 appointment_1
+                     Output: appointment_1.status
+                     Remote SQL: SELECT status FROM public.appointment_p1
+         ->  Partial HashAggregate
+               Output: appointment_2.status, PARTIAL count(*)
+               Group Key: appointment_2.status
+               ->  Foreign Scan on public.appointment_p2 appointment_2
+                     Output: appointment_2.status
+                     Remote SQL: SELECT status FROM public.appointment_p2
+         ->  Partial HashAggregate
+               Output: appointment_3.status, PARTIAL count(*)
+               Group Key: appointment_3.status
+               ->  Foreign Scan on public.appointment_p3 appointment_3
+                     Output: appointment_3.status
+                     Remote SQL: SELECT status FROM public.appointment_p3
+(28 rows)
+
+SET
+Timing is on.
+  status   | count  
+-----------+--------
+ COMPLETED | 116488
+ BOOKED    |  12018
+ CANCELLED |  11364
+ NO_SHOW   |  10642
+(4 rows)
+
+Time: 198.695 ms
+
+==================================================================================
+S7. Partial failure: shard2 goes down
+==================================================================================
+shard2 :5452 STOPPED
+-- patient 12345 (hash remainder 0 -> shard1, see S5) is still served (plan-time pruning: shard2 never contacted):
+patient 12345: 6 appointments
+-- a global query fails (needs every shard):
+ERROR:  could not connect to server "shard2"
+DETAIL:  connection to server at "localhost" (127.0.0.1), port 5452 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+shard2 restarted
+global count after recovery = 150512
+
+==================================================================================
+Clean-up
+==================================================================================
+stopped
