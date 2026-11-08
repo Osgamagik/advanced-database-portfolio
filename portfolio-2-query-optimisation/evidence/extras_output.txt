@@ -1,0 +1,213 @@
+SET
+SET
+Timing is on.
+=== E1. Sargability: wrapping the column in a function defeats the index ===
+--- E1a. NON-sargable: scheduled_start::date = ... (cast is applied to every row)
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Aggregate (actual time=3.597..3.598 rows=1 loops=1)
+   ->  Bitmap Heap Scan on appointment (actual time=3.364..3.591 rows=2 loops=1)
+         Recheck Cond: (doctor_id = 17)
+         Filter: (((scheduled_start AT TIME ZONE 'UTC'::text))::date = '2026-11-03'::date)
+         Rows Removed by Filter: 2477
+         Heap Blocks: exact=1398
+         ->  Bitmap Index Scan on ix_appointment_doctor_start (actual time=0.505..0.506 rows=2479 loops=1)
+               Index Cond: (doctor_id = 17)
+ Planning Time: 0.524 ms
+ Execution Time: 3.669 ms
+(10 rows)
+
+Time: 5.053 ms
+--- E1b. Sargable rewrite: half-open timestamp range
+                                                                                QUERY PLAN                                                                                
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate (actual time=0.046..0.046 rows=1 loops=1)
+   ->  Index Scan using ix_appointment_start on appointment (actual time=0.028..0.044 rows=2 loops=1)
+         Index Cond: ((scheduled_start >= '2026-11-03 00:00:00+00'::timestamp with time zone) AND (scheduled_start < '2026-11-04 00:00:00+00'::timestamp with time zone))
+         Filter: (doctor_id = 17)
+         Rows Removed by Filter: 302
+ Planning Time: 0.120 ms
+ Execution Time: 0.067 ms
+(7 rows)
+
+Time: 0.591 ms
+=== E2. Selectivity: the optimiser ignores an index when most rows match ===
+  status   | count  | pct  
+-----------+--------+------
+ COMPLETED | 116487 | 77.4
+ BOOKED    |  12019 |  8.0
+ CANCELLED |  11364 |  7.6
+ NO_SHOW   |  10642 |  7.1
+(4 rows)
+
+Time: 21.690 ms
+CREATE INDEX
+Time: 61.466 ms
+ANALYZE
+Time: 71.372 ms
+--- E2a. status = COMPLETED (~77% of rows) -> expect Seq Scan
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate (actual time=26.505..26.506 rows=1 loops=1)
+   ->  Seq Scan on appointment (actual time=0.007..15.818 rows=116487 loops=1)
+         Filter: ((status)::text = 'COMPLETED'::text)
+         Rows Removed by Filter: 34025
+ Planning Time: 0.264 ms
+ Execution Time: 26.524 ms
+(6 rows)
+
+Time: 27.451 ms
+--- E2b. status = NO_SHOW (~7% of rows) -> expect Bitmap Index Scan
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Aggregate (actual time=4.471..4.473 rows=1 loops=1)
+   ->  Bitmap Heap Scan on appointment (actual time=0.510..3.191 rows=10642 loops=1)
+         Recheck Cond: ((status)::text = 'NO_SHOW'::text)
+         Heap Blocks: exact=1607
+         ->  Bitmap Index Scan on ix_tmp_status (actual time=0.325..0.326 rows=10642 loops=1)
+               Index Cond: ((status)::text = 'NO_SHOW'::text)
+ Planning Time: 0.168 ms
+ Execution Time: 4.492 ms
+(8 rows)
+
+Time: 5.063 ms
+--- E2c. count(*) on COMPLETED: here the narrow index IS used (Index Only Scan via visibility map)
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Aggregate (actual time=21.092..21.093 rows=1 loops=1)
+   ->  Seq Scan on appointment (actual time=0.005..15.551 rows=116487 loops=1)
+         Filter: ((status)::text = 'COMPLETED'::text)
+         Rows Removed by Filter: 34025
+ Planning Time: 0.077 ms
+ Execution Time: 21.105 ms
+(6 rows)
+
+Time: 21.542 ms
+DROP INDEX
+Time: 2.077 ms
+=== E3. Q4 (monthly revenue) did not benefit from indexes: it aggregates ~50k rows across 5 tables. ===
+=== Fix: pre-aggregate in a MATERIALIZED VIEW refreshed nightly (reporting workload). ===
+psql:extras.sql:33: NOTICE:  materialized view "mv_monthly_department_revenue" does not exist, skipping
+DROP MATERIALIZED VIEW
+Time: 0.181 ms
+SELECT 184
+Time: 177.051 ms
+CREATE INDEX
+Time: 2.264 ms
+                                                                       QUERY PLAN                                                                       
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort (actual time=0.177..0.181 rows=88 loops=1)
+   Sort Key: m.month, dep.name
+   Sort Method: quicksort  Memory: 29kB
+   ->  Nested Loop (actual time=0.012..0.113 rows=88 loops=1)
+         Join Filter: (m.department_id = dep.department_id)
+         Rows Removed by Join Filter: 308
+         ->  Seq Scan on mv_monthly_department_revenue m (actual time=0.007..0.020 rows=88 loops=1)
+               Filter: ((month >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (month < '2027-01-01 00:00:00+00'::timestamp with time zone))
+               Rows Removed by Filter: 96
+         ->  Seq Scan on department dep (actual time=0.000..0.000 rows=4 loops=88)
+ Planning Time: 0.246 ms
+ Execution Time: 0.200 ms
+(12 rows)
+
+Time: 1.097 ms
+--- refresh cost (paid once per night instead of on every dashboard load)
+REFRESH MATERIALIZED VIEW
+Time: 155.909 ms
+=== E4. Q3 rewrite: aggregate diagnosis counts BEFORE joining dimension tables ===
+                                                                               QUERY PLAN                                                                                
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Incremental Sort (actual time=89.227..89.236 rows=18 loops=1)
+   Sort Key: dep.name, r.rnk
+   Presorted Key: dep.name
+   Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 26kB  Peak Memory: 26kB
+   ->  Nested Loop (actual time=89.163..89.218 rows=18 loops=1)
+         Join Filter: (dep.department_id = r.department_id)
+         Rows Removed by Join Filter: 126
+         ->  Index Scan using department_name_key on department dep (actual time=0.003..0.012 rows=8 loops=1)
+         ->  Materialize (actual time=11.143..11.148 rows=18 loops=8)
+               ->  Subquery Scan on r (actual time=89.139..89.167 rows=18 loops=1)
+                     ->  WindowAgg (actual time=89.138..89.162 rows=18 loops=1)
+                           Run Condition: (dense_rank() OVER (?) <= 3)
+                           ->  Sort (actual time=89.124..89.131 rows=22 loops=1)
+                                 Sort Key: dx_counts.department_id, dx_counts.cases DESC
+                                 Sort Method: quicksort  Memory: 26kB
+                                 ->  Subquery Scan on dx_counts (actual time=89.099..89.112 rows=22 loops=1)
+                                       ->  HashAggregate (actual time=89.097..89.107 rows=22 loops=1)
+                                             Group Key: d.department_id, dx.icd10_code
+                                             Batches: 1  Memory Usage: 40kB
+                                             ->  Hash Join (actual time=36.575..75.966 rows=63586 loops=1)
+                                                   Hash Cond: (a.doctor_id = d.doctor_id)
+                                                   ->  Hash Join (actual time=36.551..59.324 rows=63586 loops=1)
+                                                         Hash Cond: (dx.appointment_id = a.appointment_id)
+                                                         ->  Seq Scan on diagnosis dx (actual time=0.002..11.352 rows=116487 loops=1)
+                                                         ->  Hash (actual time=22.357..22.358 rows=87859 loops=1)
+                                                               Buckets: 131072  Batches: 1  Memory Usage: 4800kB
+                                                               ->  Index Scan using ix_appointment_start on appointment a (actual time=0.008..12.339 rows=87859 loops=1)
+                                                                     Index Cond: (scheduled_start >= '2025-10-31 00:00:00+00'::timestamp with time zone)
+                                                   ->  Hash (actual time=0.018..0.019 rows=60 loops=1)
+                                                         Buckets: 1024  Batches: 1  Memory Usage: 11kB
+                                                         ->  Seq Scan on doctor d (actual time=0.005..0.011 rows=60 loops=1)
+ Planning Time: 0.573 ms
+ Execution Time: 89.340 ms
+(33 rows)
+
+Time: 90.886 ms
+=== E5. Index usage statistics since the benchmark started (run benchmark.py first) ===
+                         index                         | scans  |  size   
+-------------------------------------------------------+--------+---------
+ appointment_pkey                                      | 339363 | 3328 kB
+ invoice_pkey                                          | 214692 | 5136 kB
+ patient_pkey                                          | 155909 | 456 kB
+ doctor_pkey                                           | 155690 | 16 kB
+ no_doctor_double_booking                              | 139157 | 12 MB
+ icd10_code_pkey                                       | 116607 | 16 kB
+ medication_pkey                                       | 102367 | 16 kB
+ prescription_pkey                                     | 102326 | 1544 kB
+ lab_order_pkey                                        |  35037 | 784 kB
+ lab_test_pkey                                         |  35013 | 16 kB
+ ix_appointment_patient                                |    648 | 4656 kB
+ department_pkey                                       |    132 | 16 kB
+ diagnosis_appointment_id_icd10_code_key               |    120 | 3608 kB
+ prescription_item_pkey                                |    120 | 3160 kB
+ invoice_appointment_id_key                            |     48 | 5136 kB
+ ix_prescription_appointment                           |     48 | 1544 kB
+ lab_result_pkey                                       |     24 | 784 kB
+ ix_appointment_start                                  |     18 | 1424 kB
+ ix_payment_paid_at                                    |     12 | 4272 kB
+ ix_payment_invoice                                    |     12 | 2384 kB
+ patient_hospital_no_key                               |     12 | 632 kB
+ ix_lab_order_appointment                              |     12 | 784 kB
+ ix_lab_result_high_recent                             |      6 | 160 kB
+ ix_invoice_unpaid                                     |      6 | 208 kB
+ ix_patient_lower_lastname                             |      6 | 608 kB
+ audit_log_pkey                                        |      1 | 16 kB
+ mv_monthly_department_revenue_month_department_id_idx |      0 | 16 kB
+ diagnosis_pkey                                        |      0 | 2568 kB
+ allergy_pkey                                          |      0 | 136 kB
+ medication_name_form_strength_key                     |      0 | 16 kB
+ doctor_email_key                                      |      0 | 16 kB
+ doctor_licence_no_key                                 |      0 | 16 kB
+ department_name_key                                   |      0 | 16 kB
+ payment_pkey                                          |      0 | 2368 kB
+ ix_appointment_doctor_start                           |      0 | 7312 kB
+(35 rows)
+
+Time: 3.387 ms
+=== E6. Cost of indexes on writes: insert 5,000 appointments WITH vs WITHOUT the 3 extra appointment indexes ===
+--- E6a. with all indexes
+BEGIN
+Time: 0.269 ms
+INSERT 0 5000
+Time: 336.114 ms
+ROLLBACK
+Time: 0.681 ms
+--- E6b. optimisation indexes on appointment dropped (inside the transaction, restored by ROLLBACK)
+BEGIN
+Time: 0.187 ms
+DROP INDEX
+Time: 0.504 ms
+INSERT 0 5000
+Time: 311.699 ms
+ROLLBACK
+Time: 0.516 ms
