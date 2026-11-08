@@ -1,0 +1,39 @@
+flowchart LR
+    subgraph Users
+        R[Reception desks]
+        D[Doctors' tablets]
+        M[Patient mobile app]
+        F[Finance / management BI]
+    end
+
+    subgraph AWS["AWS eu-west-2 (London) – UK data residency"]
+        ALB[Application Load Balancer]
+        APP[App servers<br/>auto-scaling group]
+        subgraph AZa["Availability Zone A"]
+            P[(RDS PostgreSQL 16<br/>PRIMARY)]
+            C1[(ElastiCache Redis<br/>primary)]
+        end
+        subgraph AZb["Availability Zone B"]
+            S[(Multi-AZ STANDBY<br/>synchronous)]
+            C2[(Redis replica)]
+        end
+        subgraph AZc["Availability Zone C"]
+            RR[(Read replica<br/>asynchronous)]
+        end
+        B[(S3: automated backups<br/>+ WAL archive, 35-day PITR)]
+    end
+
+    DR[(Cross-region replica<br/>eu-west-1 Dublin – DR)]
+
+    R --> ALB
+    D --> ALB
+    M --> ALB
+    ALB --> APP
+    APP -- writes / OLTP --> P
+    APP -- cache, queues, streams --> C1
+    F -- reports, Q3/Q4 --> RR
+    P -- sync replication --> S
+    P -- async streaming --> RR
+    P -- async --> DR
+    C1 -- replication --> C2
+    P -. snapshots + WAL .-> B
