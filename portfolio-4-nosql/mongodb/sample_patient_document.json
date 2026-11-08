@@ -1,0 +1,124 @@
+{
+    "dob": "1957-06-30",
+    "sex": "X",
+    "name": {
+        "last": "Abubakar",
+        "first": "Michael"
+    },
+    "contact": {
+        "city": "Leeds",
+        "email": "patient12345@mail.example",
+        "phone": "+44 7042867443",
+        "postcode": "AB56 6CD"
+    },
+    "wearable": {
+        "device": "SmartWatch X",
+        "synced": "2026-10-30",
+        "resting_hr": [
+            62,
+            64,
+            61
+        ]
+    },
+    "allergies": [
+        {
+            "allergen": "Latex",
+            "severity": "SEVERE"
+        }
+    ],
+    "encounters": [
+        {
+            "date": "2025-03-19T10:30:00+00:00",
+            "labs": [
+                {
+                    "flag": "N",
+                    "test": "CRP",
+                    "value": 2.56
+                }
+            ],
+            "doctor": "Amaka Lawal",
+            "status": "COMPLETED",
+            "diagnoses": [
+                "E03.9"
+            ],
+            "department": "Endocrinology",
+            "medications": [
+                {
+                    "qty": 28,
+                    "name": "Atorvastatin",
+                    "strength": "20mg"
+                }
+            ]
+        },
+        {
+            "date": "2025-03-28T14:00:00+00:00",
+            "doctor": "Amaka Lawal",
+            "status": "COMPLETED",
+            "diagnoses": [
+                "E11.9"
+            ],
+            "department": "Endocrinology"
+        },
+        {
+            "date": "2025-05-28T13:00:00+00:00",
+            "doctor": "Tunde Adeyemi",
+            "status": "COMPLETED",
+            "diagnoses": [
+                "M54.5"
+            ],
+            "department": "Orthopaedics",
+            "medications": [
+                {
+                    "qty": 28,
+                    "name": "Levothyroxine",
+                    "strength": "50mcg"
+                },
+                {
+                    "qty": 56,
+                    "name": "Omeprazole",
+                    "strength": "20mg"
+                }
+            ]
+        },
+        {
+            "date": "2025-05-28T14:15:00+00:00",
+            "doctor": "Fatima Nwosu",
+            "status": "COMPLETED",
+            "diagnoses": [
+                "O80"
+            ],
+            "department": "Obstetrics & Gynaecology"
+        },
+        {
+            "date": "2025-07-16T10:30:00+00:00",
+            "labs": [
+                {
+                    "flag": "N",
+                    "test": "CRP",
+                    "value": 2.07
+                }
+            ],
+            "doctor": "Chioma Lawal",
+            "status": "COMPLETED",
+            "diagnoses": [
+                "I10"
+            ],
+            "department": "Cardiology",
+            "medications": [
+                {
+                    "qty": 10,
+                    "name": "Amoxicillin",
+                    "strength": "500mg"
+                }
+            ]
+        },
+        {
+            "date": "2025-08-01T13:15:00+00:00",
+            "doctor": "Amaka Okafor",
+            "status": "CANCELLED",
+            "department": "Obstetrics & Gynaecology"
+        }
+    ],
+    "blood_group": "A-",
+    "hospital_no": "CP00012345"
+}
